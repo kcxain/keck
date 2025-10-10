@@ -1,0 +1,284 @@
+from dataclasses import dataclass
+import glob
+import os
+import re
+import subprocess
+import tempfile
+import torch
+from unittest.mock import patch
+from typing import Dict, Optional, Tuple
+import orjson
+import ray
+from fastapi import FastAPI, Form
+from fastapi.responses import JSONResponse
+from app.helper import _validate_cuda_code, parse_eval_msg
+
+APP_NAME = "ray-cuda-exec"
+
+app = FastAPI(title=APP_NAME)
+
+if not ray.is_initialized():
+    # this is for local ray cluster
+    runtime_env = {
+        "env_vars": {
+            "TOKENIZERS_PARALLELISM": "true",
+            "NCCL_DEBUG": "0",
+            "BPEX_NO_WARN_ON_UNTUNED_CASE": "1",
+            "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7",
+        }
+    }
+    try:
+        # 首选带资源限制的初始化（适用于新启动的本地集群）
+        ray.init(runtime_env=runtime_env, num_cpus=128, num_gpus=8)
+    except ValueError as e:
+        # 如果正在连接到已有集群，不能传 num_cpus/num_gpus，重试一次不传这些参数
+        msg = str(e)
+        if (
+            "When connecting to an existing cluster, num_cpus and num_gpus must not be provided"
+            in msg
+        ):
+            ray.init(runtime_env=runtime_env)
+        else:
+            # 不是这个已知问题则继续抛出
+            raise
+
+
+def json_response(data: dict, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(
+        content=orjson.loads(orjson.dumps(data)), status_code=status_code
+    )
+
+
+with open("app/test_code_tmpl.py", "r") as fin:
+    TEST_CODE_TMPL = fin.read()
+
+
+def _compile_ext(cuda_code: str) -> Tuple[bool, Dict]:
+    ret = {
+        "ext_filename": None,
+        "ext_content": None,
+        "msg": None,
+    }
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "model_new.py"), "w") as fout:
+            fout.write(cuda_code)
+
+        compile_log = ""
+        success = True
+        try:
+            compile_cmd = "python model_new.py"
+            # A100: 8.0
+            with patch.dict(
+                os.environ,
+                {
+                    "TORCH_CUDA_ARCH_LIST": "8.0",
+                    "TORCH_EXTENSIONS_DIR": "build",
+                    "MAX_JOBS": "1",
+                },
+            ):
+                compile_result = subprocess.run(
+                    compile_cmd,
+                    timeout=180,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    shell=True,
+                    cwd=tmpdir,
+                )
+            compile_log = compile_result.stdout.decode()
+            so_files = glob.glob(f"{tmpdir}/build/**/*.so")
+            assert len(so_files) == 1, f"should generate 1 .so file, got {so_files}"
+            with open(so_files[0], "rb") as fin:
+                bin_content = fin.read()
+            ret["ext_filename"] = os.path.basename(so_files[0])
+            ret["ext_content"] = bin_content
+            ret["msg"] = "compile success"
+            success = True
+        except subprocess.TimeoutExpired:
+            success = False
+            ret["msg"] = "failed: compilation timed out"
+        except Exception as e:
+            success = False
+            ret["msg"] = f"failed: compilation error: [{e}] log: [{compile_log}]"
+        return success, ret
+
+
+def _exec_eval(
+    ext_filename: str, ext_content: bytes, cuda_code: str, pytorch_module: str
+):
+    """Compile and execute test code which checks output with cuda implementation and pytorch module
+    :param ext_filename: the cuda extension filename, in the format as "cuda_module.cpython-xxx.so"
+    :param ext_content: file content of the extension file
+    :param cuda_code: file content of the python file containing inline cuda code
+    :param pytorch_module: pytorch baseline implementation. Should have Model.forward(...) and get_inputs() api
+    :return (status,msg): (True,stdout) for success, (False,stderr) for error
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, ext_filename), "wb") as fout:
+            fout.write(ext_content)
+        with open(os.path.join(tmpdir, "model_new.py"), "w") as fout:
+            fout.write(cuda_code)
+        with open(os.path.join(tmpdir, "model.py"), "w") as fout:
+            fout.write(pytorch_module)
+        with open(os.path.join(tmpdir, "test.py"), "w") as fout:
+            fout.write(TEST_CODE_TMPL)
+        # with open(os.path.join(tmpdir, "profiler.py"), "w") as fout:
+        #     fout.write(PROFILER_CODE)
+
+        test_log = ""
+        try:
+            test_cmd = "python test.py"
+            test_result = subprocess.run(
+                test_cmd,
+                timeout=60,
+                stderr=subprocess.STDOUT,
+                stdout=subprocess.PIPE,
+                shell=True,
+                cwd=tmpdir,
+            )
+            test_log = test_result.stdout.decode()
+        except subprocess.TimeoutExpired:
+            # 超时
+            return False, "failed: test timed out"
+        except Exception as e:
+            # 错误
+            return False, f"failed: test error: [{e}] log: [{test_log}]"
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                torch.cuda.synchronize()
+                # logger.info(
+                #     f"Final GPU memory: {torch.cuda.memory_allocated() / 1e9:.2f} GB"
+                # )
+        if test_result.returncode != 0:
+            # assert error, 输出可能过长
+            lines = test_log.strip().splitlines()
+            filtered = []
+            for line in lines:
+                if "AssertionError" in line or "Mismatch" in line:
+                    filtered.append(line)
+            short_log = "\n".join(filtered)
+            if filtered == []:
+                short_log = lines[0]
+            return False, f"failed: test error: {short_log}"
+    assert "#### Correctness check passed!" in test_log
+    return True, parse_eval_msg(test_log)
+
+
+def parse_compile_msg(msg: str) -> str:
+    # 1. 提取关键行（error、FAILED、RuntimeError）
+    key_lines = []
+    for line in msg.splitlines():
+        if (
+            re.search(r"error:", line, re.IGNORECASE)
+            or re.search(r"FAILED:", line)
+            or re.search(r"RuntimeError:", line)
+        ):
+            key_lines.append(line.strip())
+
+    if not key_lines:
+        # 没找到关键词，退化为首10行
+        return "\n".join(msg.splitlines()[:10])
+
+    # 2. 去除绝对路径（/a/b/c/file.cu -> file.cu）
+    def simplify_path(text: str):
+        # 匹配以 / 开头且包含 .cu / .cpp / .h / .py 等文件名的路径
+        text = re.sub(r"([\w\-/\.]*?/)([^/\s]+\.(?:cu|cpp|c|cc|h|py))", r"\2", text)
+        return text
+
+    simplified = [simplify_path(l) for l in key_lines]
+
+    # 3. 去掉重复行和冗余符号
+    seen = set()
+    cleaned = []
+    for line in simplified:
+        line = line.strip()
+        if not line or line in seen:
+            continue
+        seen.add(line)
+        # 压缩多余空格
+        line = re.sub(r"\s+", " ", line)
+        cleaned.append(line)
+
+    # 4. 只保留前几行，控制长度
+    return "\n".join(cleaned[:5])
+
+
+def compile_and_eval(cuda_code: str, pytorch_module: str):
+    remote_compile_ext = ray.remote(num_cpus=8)(_compile_ext)
+    compile_succ, compile_ret = ray.get(remote_compile_ext.remote(cuda_code=cuda_code))
+    compile_msg = compile_ret["msg"]
+    compile_msg = parse_compile_msg(compile_msg)
+    if not compile_succ:
+        return {
+            "formated": True,
+            "compiled": False,
+            "passed": False,
+            "msg": compile_msg,
+        }
+
+    ext_filename = compile_ret["ext_filename"]
+    ext_content = compile_ret["ext_content"]
+    run_kwargs = dict(
+        ext_filename=ext_filename,
+        ext_content=ext_content,
+        cuda_code=cuda_code,
+        pytorch_module=pytorch_module,
+    )
+    gpu_eval_task = ray.remote(num_gpus=1)(_exec_eval)
+    eval_future = gpu_eval_task.remote(**run_kwargs)
+    status, eval_content = ray.get(eval_future)
+    return {
+        "formated": True,
+        "compiled": True,
+        "passed": status,
+        "msg": eval_content,
+    }
+
+
+@dataclass
+class Result:
+    formated: bool
+    compiled: bool
+    passed: bool
+    msg: str | dict
+
+
+@app.post("/compute_score")
+async def compute_score(
+    cuda_code: Optional[str] = Form(None), torch_code: Optional[str] = Form(None)
+):
+    # cuda_code = _extract_cuda_code(cuda_code)
+
+    if cuda_code is None:
+        res = Result(
+            formated=False,
+            compiled=False,
+            passed=False,
+            msg="Cannot find cuda code block",
+        )
+        return json_response(res)
+    else:
+        validate_ret, validate_msg = _validate_cuda_code(cuda_code)
+        if not validate_ret:
+            res = Result(
+                formated=True,
+                compiled=False,
+                passed=False,
+                msg=validate_msg,
+            )
+            return json_response(res)
+
+        res = compile_and_eval(cuda_code, torch_code)
+        return json_response(res)
+
+
+@app.get("/healthz")
+async def healthz():
+    info = {
+        "ray_initialized": ray.is_initialized(),
+        "cluster_resources": ray.cluster_resources(),
+        "available_resources": ray.available_resources(),
+    }
+    return json_response(info)

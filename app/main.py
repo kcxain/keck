@@ -160,48 +160,55 @@ def _exec_eval(
                     filtered.append(line)
             short_log = "\n".join(filtered)
             if filtered == []:
-                short_log = lines[0]
+                short_log = lines[:5]
             return False, f"failed: test error: {short_log}"
     assert "#### Correctness check passed!" in test_log
     return True, parse_eval_msg(test_log)
 
 
-def parse_compile_msg(msg: str) -> str:
-    # 1. 提取关键行（error、FAILED、RuntimeError）
+def parse_compile_msg(msg: str, keep_levels=5) -> str:
+    # 1. 提取关键行
     key_lines = []
     for line in msg.splitlines():
-        if (
-            re.search(r"error:", line, re.IGNORECASE)
-            or re.search(r"FAILED:", line)
-            or re.search(r"RuntimeError:", line)
+        if re.search(
+            r"(error:|FAILED:|RuntimeError:|CalledProcessError:)", line, re.IGNORECASE
         ):
             key_lines.append(line.strip())
 
     if not key_lines:
-        # 没找到关键词，退化为首10行
         return "\n".join(msg.splitlines()[:10])
 
-    # 2. 去除绝对路径（/a/b/c/file.cu -> file.cu）
-    def simplify_path(text: str):
-        # 匹配以 / 开头且包含 .cu / .cpp / .h / .py 等文件名的路径
-        text = re.sub(r"([\w\-/\.]*?/)([^/\s]+\.(?:cu|cpp|c|cc|h|py))", r"\2", text)
-        return text
+    # 2. 简化路径，保留最后 keep_levels 层
+    def simplify_path_keep_levels(text: str, levels=keep_levels):
+        # 匹配所有类似 /a/b/c/.../file.ext 的路径
+        def replacer(m):
+            full_path = m.group(0)
+            parts = full_path.strip("/").split("/")
+            if len(parts) > levels:
+                parts = parts[-levels:]  # 只保留最后几层
+            return "/".join(parts)
 
-    simplified = [simplify_path(l) for l in key_lines]
+        # 匹配 .cu/.cpp/.c/.h/.py/.so/.o 文件
+        text = re.sub(
+            r"(/[A-Za-z0-9_\-./]+/)*[A-Za-z0-9_\-]+\.(?:cu|cpp|c|cc|h|py|so|o|d)",
+            replacer,
+            text,
+        )
+        # 去掉多余引号和转义
+        text = text.replace("\\", "").replace("'", "").replace('"', "")
+        return text.strip()
 
-    # 3. 去掉重复行和冗余符号
+    simplified = [simplify_path_keep_levels(l) for l in key_lines]
+
+    # 3. 去重并压缩空格
     seen = set()
     cleaned = []
     for line in simplified:
-        line = line.strip()
-        if not line or line in seen:
-            continue
-        seen.add(line)
-        # 压缩多余空格
         line = re.sub(r"\s+", " ", line)
-        cleaned.append(line)
+        if line not in seen:
+            seen.add(line)
+            cleaned.append(line)
 
-    # 4. 只保留前几行，控制长度
     return "\n".join(cleaned[:5])
 
 

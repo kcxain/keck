@@ -8,6 +8,7 @@ dependencies = [
     "fastapi==0.115.0",
     "ninja>=1.13.0",
     "numpy>=2.3.3",
+    "nvidia-cutlass-dsl>=4.2.1",
     "orjson==3.10.7",
     "pydantic==2.9.2",
     "python-multipart==0.0.9",

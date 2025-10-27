@@ -52,6 +52,9 @@ def json_response(data: dict, status_code: int = 200) -> JSONResponse:
 with open("app/test_code_tmpl.py", "r") as fin:
     TEST_CODE_TMPL = fin.read()
 
+with open("app/test_torch.py", "r") as fin:
+    TEST_TORCH_TMPL = fin.read()
+
 
 def _compile_ext(cuda_code: str) -> Tuple[bool, Dict]:
     ret = {
@@ -278,6 +281,82 @@ async def compute_score(
             return json_response(res)
 
         res = compile_and_eval(cuda_code, torch_code)
+        return json_response(res)
+
+
+def _exec_torch(gt_torch: str, to_check_torch: str):
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "model_new.py"), "w") as fout:
+            fout.write(to_check_torch)
+        with open(os.path.join(tmpdir, "model.py"), "w") as fout:
+            fout.write(gt_torch)
+        with open(os.path.join(tmpdir, "test.py"), "w") as fout:
+            fout.write(TEST_TORCH_TMPL)
+
+        test_log = ""
+        try:
+            test_cmd = "python test.py"
+            test_result = subprocess.run(
+                test_cmd,
+                timeout=60,
+                stderr=subprocess.STDOUT,
+                stdout=subprocess.PIPE,
+                shell=True,
+                cwd=tmpdir,
+            )
+            test_log = test_result.stdout.decode()
+        except subprocess.TimeoutExpired:
+            # 超时
+            return False, "failed: test timed out"
+        except Exception as e:
+            # 错误
+            return False, f"failed: test error: [{e}] log: [{test_log}]"
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
+                torch.cuda.synchronize()
+                # logger.info(
+                #     f"Final GPU memory: {torch.cuda.memory_allocated() / 1e9:.2f} GB"
+                # )
+        if test_result.returncode != 0:
+            # assert error, 输出可能过长
+            lines = test_log.strip().splitlines()
+            filtered = []
+            for line in lines:
+                if "AssertionError" in line or "Mismatch" in line:
+                    filtered.append(line)
+            short_log = "\n".join(filtered)
+            if filtered == []:
+                short_log = lines[:5]
+            return False, f"failed: test error: {short_log}"
+    assert "#### Correctness check passed!" in test_log
+    return True, test_log
+
+
+@app.post("/check_torch")
+async def check_torch(
+    gt_torch: Optional[str] = Form(None), to_check_torch: Optional[str] = Form(None)
+):
+    if to_check_torch is None:
+        res = Result(
+            formated=False,
+            compiled=False,
+            passed=False,
+            msg="Cannot find torch code block",
+        )
+        return json_response(res)
+    else:
+        run_kwargs = dict(gt_torch=gt_torch, to_check_torch=to_check_torch)
+        gpu_eval_task = ray.remote(num_gpus=1)(_exec_torch)
+        eval_future = gpu_eval_task.remote(**run_kwargs)
+        status, eval_content = ray.get(eval_future)
+        res = {
+            "formated": True,
+            "compiled": True,
+            "passed": status,
+            "msg": eval_content,
+        }
         return json_response(res)
 
 

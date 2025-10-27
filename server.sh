@@ -5,9 +5,9 @@
 # (TODO)
 # Please modify job name
 
-#SBATCH -J cuda_server              # The job name
-#SBATCH -o cuda_server.out        # Write the standard output to file named 'ret-<job_number>.out'
-#SBATCH -e cuda_server.err        # Write the standard error to file named 'ret-<job_number>.err'
+#SBATCH -J cuda_server-1              # The job name
+#SBATCH -o cuda_server-1.out        # Write the standard output to file named 'ret-<job_number>.out'
+#SBATCH -e cuda_server-1.err        # Write the standard error to file named 'ret-<job_number>.err'
 
 
 #- Resources
@@ -25,13 +25,13 @@
 ###
 ### The system will alloc 8 or 16 cores per gpu by default.
 ### If you need more or less, use following:
-### #SBATCH --cpus-per-task=K            # Request K cores
+#SBATCH --cpus-per-task=128            # Request K cores
 ###
 ### 
 ### Without specifying the constraint, any available nodes that meet the requirement will be allocated
 ### You can specify the characteristics of the compute nodes, and even the names of the compute nodes
 ###
-### #SBATCH --nodelist=r8a30-a0          # Request a specific list of hosts 
+### #SBATCH --nodelist=r8a100-d04          # Request a specific list of hosts 
 ### #SBATCH --constraint="A30|A100"      # Request GPU Type: A30 or A100_40GB
 ###
 
@@ -83,13 +83,6 @@ scontrol show jobid $SLURM_JOB_ID -dd | awk '/IDX/ {print $2, $4}'
 
 ray start --head
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 32
-
-if [ $? -eq 0 ]; then
-    echo "Job finished successfully, no need to resubmit."
-else
-    echo "Job exited with non-zero status. Resubmitting..."
-    sbatch server.sh
-fi
 
 echo "Job end at $(date "+%Y-%m-%d %H:%M:%S")"
 # This will overwrite any existing atop logs from previous runs.

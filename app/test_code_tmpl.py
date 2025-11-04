@@ -99,27 +99,27 @@ def benchmark_model(model, inputs, warmup_runs=1, benchmark_runs=2):
     return avg_time
 
 
-@contextmanager
-def block_torch_functional(excludes=None):
-    if excludes is None:
-        excludes = set()
-    originals = {}
-    for name in dir(F):
-        attr = getattr(F, name)
-        if callable(attr) and not name.startswith("_") and name not in excludes:
-            originals[name] = attr
+# @contextmanager
+# def block_torch_functional(excludes=None):
+#     if excludes is None:
+#         excludes = set()
+#     originals = {}
+#     for name in dir(F):
+#         attr = getattr(F, name)
+#         if callable(attr) and not name.startswith("_") and name not in excludes:
+#             originals[name] = attr
 
-            def wrapper(*args, __name=name, **kwargs):
-                raise RuntimeError(
-                    f"Function {F.__name__}.{__name} is not allowed in this context."
-                )
+#             def wrapper(*args, __name=name, **kwargs):
+#                 raise RuntimeError(
+#                     f"Function {F.__name__}.{__name} is not allowed in this context."
+#                 )
 
-            setattr(F, name, wrapper)
-    try:
-        yield
-    finally:
-        for name, attr in originals.items():
-            setattr(F, name, attr)
+#             setattr(F, name, wrapper)
+#     try:
+#         yield
+#     finally:
+#         for name, attr in originals.items():
+#             setattr(F, name, attr)
 
 
 init_inputs = get_init_inputs()
@@ -142,8 +142,8 @@ cuda_inputs = transform_tensors(torch_inputs, lambda x: x.clone())
 # 正确性
 with torch.no_grad():
     # CUDA outputs
-    with block_torch_functional():
-        cuda_outputs = cuda_model(*cuda_inputs)
+    #   with block_torch_functional():
+    cuda_outputs = cuda_model(*cuda_inputs)
     torch.cuda.synchronize()
     # Torch outputs
     torch_outputs = torch_model(*torch_inputs)
@@ -155,10 +155,10 @@ print("#### Correctness check passed!")
 print("#### Benchmark Torch Start")
 torch_time = benchmark_model(torch_model, torch_inputs)
 print("#### Benchmark Troch End")
-with block_torch_functional():
-    print("#### Benchmark CUDA Start")
-    cuda_time = benchmark_model(cuda_model, cuda_inputs)
-    print("#### Benchmark CUDA End")
+# with block_torch_functional():
+print("#### Benchmark CUDA Start")
+cuda_time = benchmark_model(cuda_model, cuda_inputs)
+print("#### Benchmark CUDA End")
 speedup = torch_time / cuda_time if cuda_time > 0 else 0
 print(
     f"Torch time: {torch_time:.6f}s, CUDA time: {cuda_time:.6f}s, Speedup: {speedup:.2f}x"

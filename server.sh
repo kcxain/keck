@@ -5,9 +5,9 @@
 # (TODO)
 # Please modify job name
 
-#SBATCH -J cuda_server-1              # The job name
-#SBATCH -o cuda_server-1.out        # Write the standard output to file named 'ret-<job_number>.out'
-#SBATCH -e cuda_server-1.err        # Write the standard error to file named 'ret-<job_number>.err'
+#SBATCH -J cuda_server              # The job name
+#SBATCH -o cuda_server.out        # Write the standard output to file named 'ret-<job_number>.out'
+#SBATCH -e cuda_server.err        # Write the standard error to file named 'ret-<job_number>.err'
 
 
 #- Resources
@@ -15,7 +15,7 @@
 # (TODO)
 # Please modify your requirements
 
-#SBATCH -p r8nv-gpu-hw-80g               # Submit to 'r8nv-gpu-hw' Partitiion
+#SBATCH -p r8nv-gpu-hw               # Submit to 'r8nv-gpu-hw' Partitiion
 #SBATCH -t 1-00:00:00                # Run for a maximum time of 0 days, 12 hours, 00 mins, 00 secs
 #SBATCH --nodes=1                    # Request N nodes
 #SBATCH --gres=gpu:8                 # Request M GPU per node

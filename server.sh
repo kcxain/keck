@@ -15,7 +15,7 @@
 # (TODO)
 # Please modify your requirements
 
-#SBATCH -p r8nv-gpu-hw               # Submit to 'r8nv-gpu-hw' Partitiion
+#SBATCH -p r8nv-gpu-hw-80g               # Submit to 'r8nv-gpu-hw' Partitiion
 #SBATCH -t 1-00:00:00                # Run for a maximum time of 0 days, 12 hours, 00 mins, 00 secs
 #SBATCH --nodes=1                    # Request N nodes
 #SBATCH --gres=gpu:8                 # Request M GPU per node
@@ -80,6 +80,8 @@ echo "Using GPU(s) ${CUDA_VISIBLE_DEVICES}"                         # which GPUs
 #- The CUDA_VISIBLE_DEVICES variable is assigned and specified by SLURM
 echo "This job is assigned the following resources by SLURM:"
 scontrol show jobid $SLURM_JOB_ID -dd | awk '/IDX/ {print $2, $4}'
+
+ray stop
 
 ray start --head
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 32

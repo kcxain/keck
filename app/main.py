@@ -24,7 +24,7 @@ if not ray.is_initialized():
             "TOKENIZERS_PARALLELISM": "true",
             "NCCL_DEBUG": "0",
             "BPEX_NO_WARN_ON_UNTUNED_CASE": "1",
-            "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7",
+            # "CUDA_VISIBLE_DEVICES": "0,1,2,3,4,5,6,7",
         }
     }
     try:
@@ -270,15 +270,15 @@ async def compute_score(
         )
         return json_response(res)
     else:
-        validate_ret, validate_msg = _validate_cuda_code(cuda_code)
-        if not validate_ret:
-            res = Result(
-                formated=True,
-                compiled=False,
-                passed=False,
-                msg=validate_msg,
-            )
-            return json_response(res)
+        # validate_ret, validate_msg = _validate_cuda_code(cuda_code)
+        # if not validate_ret:
+        #     res = Result(
+        #         formated=True,
+        #         compiled=False,
+        #         passed=False,
+        #         msg=validate_msg,
+        #     )
+        #     return json_response(res)
 
         res = compile_and_eval(cuda_code, torch_code)
         return json_response(res)

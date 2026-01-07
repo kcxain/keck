@@ -54,7 +54,7 @@ class ExecuteConfig:
     # benchmark 正式运行次数
     benchmark_runs: int = 2
     execute_gpus: int = field(
-        default_factory=lambda: float(os.getenv("EXECUTE_GPUS_PER_TASK", "0.5"))
+        default_factory=lambda: int(os.getenv("EXECUTE_GPUS_PER_TASK", "1"))
     )
 
 

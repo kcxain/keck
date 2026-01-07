@@ -84,7 +84,7 @@ scontrol show jobid $SLURM_JOB_ID -dd | awk '/IDX/ {print $2, $4}'
 ray stop
 
 ray start --head
-uvicorn app.main:app --host 0.0.0.0 --port 8888 --workers 32
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 32
 
 echo "Job end at $(date "+%Y-%m-%d %H:%M:%S")"
 # This will overwrite any existing atop logs from previous runs.

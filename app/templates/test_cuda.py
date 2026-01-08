@@ -121,10 +121,20 @@ def main():
 
     # 正确性检查
     with torch.no_grad():
-        cuda_outputs = cuda_model(*cuda_inputs)
+        # 先执行 CUDA 模型并立即检查错误
+        try:
+            cuda_outputs = cuda_model(*cuda_inputs)
+            torch.cuda.synchronize()  # 强制同步，让 CUDA kernel 错误在这里暴露
+        except RuntimeError as e:
+            if "illegal memory access" in str(e) or "CUDA error" in str(e):
+                raise RuntimeError(f"CUDA model execution failed: {e}") from e
+            raise
 
+        # 再执行 torch 模型
         torch_outputs = torch_model(*torch_inputs)
         torch.cuda.synchronize()
+
+        # 对比结果
         check_equal(cuda_outputs, torch_outputs)
 
     print("#### Correctness check passed!")

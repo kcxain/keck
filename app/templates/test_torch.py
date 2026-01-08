@@ -5,6 +5,7 @@ PyTorch vs PyTorch 正确性验证模板
 - model.py: 基准 PyTorch 实现，包含 Model, get_inputs, get_init_inputs
 - model_new.py: 待检查的 PyTorch 实现，包含 Model
 """
+
 import gc
 import random
 
@@ -56,20 +57,20 @@ def main():
     init_inputs = get_init_inputs()
     if not isinstance(init_inputs, (list, tuple)):
         init_inputs = [init_inputs]
-    
+
     seed_everywhere()
     torch_model = Model(*init_inputs).cuda()
     seed_everywhere()
     check_model = ModelNew(*init_inputs).cuda()
-    
+
     # 准备输入
     torch_inputs = get_inputs()
     if not isinstance(torch_inputs, (list, tuple)):
         torch_inputs = [torch_inputs]
-    
+
     torch_inputs = transform_tensors(torch_inputs, lambda x: x.cuda())
     check_inputs = transform_tensors(torch_inputs, lambda x: x.clone())
-    
+
     # 正确性检查
     with torch.no_grad():
         seed_everywhere()
@@ -77,9 +78,9 @@ def main():
         seed_everywhere()
         check_outputs = check_model(*check_inputs)
         check_equal(check_outputs, gt_outputs)
-    
+
     print("#### Correctness check passed!")
-    
+
     # 清理
     gc.collect()
     torch.cuda.empty_cache()
@@ -87,4 +88,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

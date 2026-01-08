@@ -84,6 +84,10 @@ scontrol show jobid $SLURM_JOB_ID -dd | awk '/IDX/ {print $2, $4}'
 ray stop
 
 ray start --head
+
+# 对于集群用这个：
+export CUDA_HOME=/tools/cluster-software/cuda-cudnn/cuda-12.4.1-9.1.1/bin/nvcc
+
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 32
 
 echo "Job end at $(date "+%Y-%m-%d %H:%M:%S")"

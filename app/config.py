@@ -47,14 +47,15 @@ class ExecuteConfig:
 
     # 执行超时时间（秒）
     exec_timeout: int = field(
-        default_factory=lambda: int(os.getenv("EXEC_TIMEOUT", "60"))
+        default_factory=lambda: int(os.getenv("EXEC_TIMEOUT", "120"))
     )
     # benchmark warmup 次数
     warmup_runs: int = 1
     # benchmark 正式运行次数
-    benchmark_runs: int = 2
-    execute_gpus: int = field(
-        default_factory=lambda: int(os.getenv("EXECUTE_GPUS_PER_TASK", "1"))
+    benchmark_runs: int = 1
+    # GPU 资源占用（1 = 独占一张卡，0.5 = 两个任务共享一张卡）
+    execute_gpus: float = field(
+        default_factory=lambda: float(os.getenv("EXECUTE_GPUS_PER_TASK", "1"))
     )
 
 

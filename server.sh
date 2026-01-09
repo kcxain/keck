@@ -86,7 +86,7 @@ ray stop
 ray start --head
 
 # 对于集群用这个：
-export CUDA_HOME=/tools/cluster-software/cuda-cudnn/cuda-12.4.1-9.1.1/bin/nvcc
+# export CUDA_HOME=/tools/cluster-software/cuda-cudnn/cuda-12.4.1-9.1.1
 
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 32
 

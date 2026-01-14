@@ -14,11 +14,22 @@ import time
 import torch
 
 from model import Model, get_inputs, get_init_inputs
-from model_new_patch import ModelNew
+
+import model_new_patch
+# 优先使用 ModelNew，如果没有再使用 Model
+if hasattr(model_new_patch, 'ModelNew'):
+    ModelNew = model_new_patch.ModelNew
+elif hasattr(model_new_patch, 'Model'):
+    ModelNew = model_new_patch.Model
+else:
+    raise ImportError("Neither 'ModelNew' nor 'Model' found in model_new_patch")
 
 # 是否启用详细 profiler（环境变量控制，默认关闭以提升速度）
 ENABLE_PROFILER = os.getenv("ENABLE_PROFILER", "0") == "1"
 
+def set_seed(seed: int):  
+    torch.manual_seed(seed)  
+    torch.cuda.manual_seed(seed)
 
 def _cleanup_gpu():
     """清理 GPU 缓存"""
@@ -105,12 +116,17 @@ def main():
     init_inputs = get_init_inputs()
     if not isinstance(init_inputs, (list, tuple)):
         init_inputs = [init_inputs]
-
+    set_seed(42)
     torch_model = Model(*init_inputs).cuda()
+    set_seed(42)
     cuda_model = ModelNew(*init_inputs).cuda()
 
     # 复制权重
-    cuda_model.load_state_dict(torch_model.state_dict())
+    # DONE: aligh with KernelBench, dropback to random seed
+    try:
+        cuda_model.load_state_dict(torch_model.state_dict())
+    except Exception as e:
+        pass
 
     # 准备输入（需要两份独立的副本，防止 in-place 操作互相影响）
     inputs = get_inputs()
@@ -118,6 +134,7 @@ def main():
         inputs = [inputs]
     torch_inputs = transform_tensors(inputs, lambda x: x.cuda())
     cuda_inputs = transform_tensors(torch_inputs, lambda x: x.clone())
+    # 此时cuda_inputs里的tensor会和torch_inputs一样，存储在GPU上（cuda设备上），因为.clone()不会更改设备，仅复制内容。
 
     # 正确性检查
     with torch.no_grad():

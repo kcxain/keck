@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 class RayConfig:
     """Ray 集群配置"""
 
-    num_cpus: int = 128
-    num_gpus: int = 8
+    num_cpus: int = field(default_factory=lambda: int(os.getenv("NUM_CPUS", "64")))
+    num_gpus: int = field(default_factory=lambda: int(os.getenv("NUM_GPUS", "8")))
     env_vars: dict = field(
         default_factory=lambda: {
             "TOKENIZERS_PARALLELISM": "true",
@@ -31,7 +31,9 @@ class CompileConfig:
     )
     # CUDA 安装路径
     cuda_home: str = field(
-        default_factory=lambda: os.getenv("CUDA_HOME", "/usr/local/cuda")
+        default_factory=lambda: os.getenv(
+            "CUDA_HOME", "/tools/cluster-software/cuda-cudnn/cuda-12.4.1-9.1.1"
+        )
     )
     # 目标 CUDA 架构（A100 = 8.0）
     cuda_arch_list: str = field(
